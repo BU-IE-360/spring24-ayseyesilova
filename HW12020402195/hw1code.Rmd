@@ -1,0 +1,241 @@
+---
+title: "IE360 SPRING 2024 HOMEWORK1"
+author: "Ayşe Sena Yeşilova - 2020402195"
+date: "5 April 2024"
+output: 
+    html_document:
+        toc: true
+        toc_depth: 2
+        number_sections: true
+        toc_float: true
+        code_folding: hide
+        fig_caption: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(  message     = FALSE,
+	                    warning     = FALSE,
+                        fig.align   = "center")
+```
+
+#Introduction
+
+In this analysis, I aim to provide a demonstration of my time series data manipulation and regression skills on a selection of time series data from Central Bank of the Republic of Turkey (CBRT).The research question is
+"To what extent do fluctuations in exchange rates and price indices influence trends in housing sales?". Frequency of the observations is monthly and the length the period is 14 years. The relevant search volume statistics are required from google trends. 
+
+#Data processing
+
+```{r toolbox-and-data}
+library(ggplot2)
+library(ggcorrplot)
+library(directlabels)
+library(tidyverse)
+library(data.table)
+library(readxl)
+library(caret)
+library(zoo)
+library(xts)
+
+setwd(getwd())
+
+usd        <-  read_excel("usd.xlsx")
+usd$Date    <-  as.Date(as.yearmon(usd$Date))
+#usd        <-  xts(usd[,-1], order.by = usd$Date)
+
+price_index <- read_excel("price_index.xlsx")
+price_index$Date    <-  as.Date(as.yearmon(price_index$Date))
+
+
+housing_sales <- read_excel("housing_sales.xlsx")
+housing_sales$Date    <-  as.Date(as.yearmon(housing_sales$Date))
+
+
+
+df      <-  list(usd, price_index, housing_sales) %>% 
+            reduce(full_join, by = "Date", copy= TRUE)
+#data   <-  merge(usd, price_index, housing_sales)
+
+
+satilik_ev  <-  fread("satilik_ev.csv")
+colnames(satilik_ev)       <-  c("Date", "satilik_ev")
+satilik_ev$Date            <-  as.Date(as.yearmon(satilik_ev$Date))
+
+konut_kredisi  <-  fread("konut_kredisi.csv")
+colnames(konut_kredisi)       <-  c("Date", "konut_kredisi")
+konut_kredisi$Date            <-  as.Date(as.yearmon(konut_kredisi$Date))
+
+df  <-  list(df, satilik_ev, konut_kredisi) %>% 
+        reduce(left_join, by = "Date")
+
+```
+
+
+#Data Visualizations
+```{r}
+ggplot(df, aes( x = Date, 
+                y = USD))         +
+    
+    geom_line(color = "firebrick3",
+              size  = 0.75)         +
+    
+    labs(y = "USD exchange rate")      +
+    
+    theme(axis.title.x = element_blank())
+
+ggplot(df, aes( x = Date, 
+                y = price_index))         +
+    
+    geom_line(color = "firebrick3",
+              size  = 0.75)         +
+    
+    labs(y = "Residential Property Price Index")      +
+    
+    theme(axis.title.x = element_blank())
+
+ggplot(df, aes( x = Date, 
+                y = konut_satis))         +
+    
+    geom_line(color = "firebrick3",
+              size  = 0.75)         +
+    
+    labs(y = "Housing Sales")      +
+    
+    theme(axis.title.x = element_blank())
+
+
+
+``` 
+
+Exchange rate and price index of residential properties have an exponential trend. Housing sales data is non-stationary. The aim is to understand why the housing sales data fluctuates
+
+#Correlation Matrices
+
+
+```{r}
+df2 <- df %>% select(USD, price_index, konut_satis)
+df_correl <- cor(df2[complete.cases(df2),])
+
+ggcorrplot( df_correl,
+            outline.color   = "white",
+            hc.order        = TRUE,
+            type            = "lower",
+            lab             = TRUE,
+            ggtheme         = ggplot2::theme_gray,
+            lab_size        = 2.25,
+            colors          = c("#6D9EC1", "white", "#E46726"))
+
+```
+
+
+#Google Trends data for search volume of "konut kredisi" and "satılık ev"
+
+```{r}
+df3 <- df %>%
+        select(Date, satilik_ev, konut_kredisi) %>%
+        gather(key = "key", value = "value", -Date)
+
+ggplot(df3, aes(x = Date, y = value, 
+                group = key, color = key))              +
+    
+    geom_line(size=0.75)                                + 
+    
+    scale_x_date(date_breaks = "2 years",
+                 date_labels = "%Y")                    +
+    
+    theme(  legend.position = "none",
+            axis.title.x    = element_blank(),             
+            axis.title.y    = element_blank())          +
+    
+    geom_dl(aes(label = key),
+            method = list(  dl.trans(x = x + .2),
+                            "smart.grid"))
+
+
+
+
+
+```
+The figure above shows that "home for sale" and "housing loan" search volumes in Turkish are correlated. There has been a huge increase in the amount of people getting housing loans in 2020 because the interest rates of the loans were lower. search volume for housing loans doesn't exceed the search volume for home for sale as expected.
+
+
+#USD exchange rates and price indices boxplot
+
+```{r}
+ggplot(df, aes(x = factor(year(Date)), y = USD)) +
+  geom_boxplot(aes(fill = factor(year(Date)))) +
+  labs(y = "USD exchange rate", x = "Year") +
+  theme(legend.position = "none")
+
+ggplot(df, aes(x = factor(year(Date)), y = price_index)) +
+  geom_boxplot(aes(fill = factor(year(Date)))) +
+  labs(y = "Residential Property Price Indices", x = "Year") +
+  theme(legend.position = "none")
+
+
+```
+
+The boxplot shows when the dollar exchange rates change the most in a year. Usd exchange rates changed most in 2023 followed by 2022 and 2018. USD exchange rates are still increasing exponentially.
+
+Most change in residential property price indices happened in 2022 and 2023. The Boxplot doesnt show a significant change in 2024 unlike the change in usd exchange rates. 
+
+#Boxplot of buying house and getting housing loan comparison
+```{r}
+df6 <- df %>%
+        select(Date, satilik_ev, konut_kredisi) %>%
+        gather(key = "key", value = "value", -Date)
+
+ggplot(df6, aes(x = Date, y = value, 
+                group = key, color = key))                  +
+    
+    geom_boxplot()                                          +
+    
+    labs(y = "sales")                          +
+    
+    theme(plot.title   = element_text(hjust = 0.5),
+          axis.title.x = element_blank(),
+          axis.text.x  = element_blank(),
+          axis.ticks.x = element_blank(),
+          legend.title = element_blank())
+```
+This boxplot shows the comparison between search statistics of house sales and getting housing loans. As we would expect, less people searched for housing loans, some people bought their house without getting a loan.
+
+
+```{r}
+ggplot(df, aes(x = Date))                   +
+    
+    geom_line(aes(y = satilik_ev),
+              color = "firebrick3",
+              size = 0.75)                  +
+    
+    geom_smooth(aes(y = satilik_ev),
+                method = "auto")            +
+    
+    labs(y = "'home for sale' search volume")                  +
+    
+    theme(axis.title.x = element_blank())
+
+ggplot(df, aes(x = Date))                   +
+    
+    geom_line(aes(y = konut_kredisi),
+              color = "firebrick3",
+              size = 0.75)                  +
+    
+    geom_smooth(aes(y = konut_kredisi),
+                method = "auto")            +
+    
+    labs(y = "'housing loan' search volume")                  +
+    
+    theme(axis.title.x = element_blank())
+```
+```There is an upwards trend in both search volume data. Searching for home for sale or housing loans on google got more popular in the last 8-9 years, that would explain the upwards trend until 2021, after 2021 housing sales dropped slightly. This might be a result of rapidly increasing price indices after 2021. 
+Housing loan search volume peaks in 2020 because interest rates for housing loans were lower in 2020. 
+
+#Conclusion
+
+Even though price indices for residential property grew rapidly since 2021, the housing sales didn't decrease so much. The relationship between price indices and housing sales is significantly weak. 
+
+People tend to buy residential properties when the interest rates are low on the housing loans, that is the main reason for the fluctuations in the housing sales data. 
+
+
+
+
